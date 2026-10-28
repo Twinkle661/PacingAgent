@@ -12,6 +12,8 @@ logging.basicConfig(
 )
 
 
+logger = logging.getLogger(__name__)
+
 # config
 
 config = {
@@ -52,7 +54,7 @@ class Prompts:
         """
     def request_context(self, msgs, msg_time, timer_status) -> str:
         parted_prompt = [
-            f"<time now="{msg_time}" />",
+            f'<time now="{msg_time}" />',
             "<existing_timer>",
             json.dumps(asdict(timer_status), default=str),
             "</existing_timer>",
@@ -108,6 +110,7 @@ class AgentPacer:
         self.prompt = Prompts()
         self.pacer_schema = make_pacer_schema(config)
 
+        # Keep only the latest pending context; in-flight LLM requests are not interrupted.
         self.msgs_queue = queue.Queue(maxsize=1)
         self.enqueue_lock = threading.Lock()
 
@@ -127,6 +130,7 @@ class AgentPacer:
         while True:
             recents = self.msgs_queue.get()
             try:
+                logger.debug("Evaluating pacing for %d recent messages", len(recents["msgs"]))
                 result = self.ctx.llm.complete_structured(
                     instructions=self.prompt.request_instruction(self.config["pacer"]),
                     input=[{
@@ -141,14 +145,14 @@ class AgentPacer:
                 )
 
                 if result.parsed is None:
-                    raise ValueError(f"Invalid LLM output: {result.text}")
+                    raise ValueError("LLM returned no parsed pacing result")
 
                 self.timer_routs(
                     result.parsed,
                     recents["time"]
                 )
             except Exception:
-                logger.error("Pacer worker failed")
+                logger.exception("Pacer worker failed")
             finally:
                 self.msgs_queue.task_done()
 
@@ -161,6 +165,7 @@ class AgentPacer:
         self.timer_status.duration = duration
         self.timer_status.ending = end_time
 
+        # Anchor the deadline to the triggering message so LLM latency adds no extra delay.
         wait_seconds = (end_time - datetime.now()).total_seconds()
 
         self.timer_task = threading.Timer(
@@ -169,9 +174,11 @@ class AgentPacer:
         )
         self.timer_task.daemon = True
         self.timer_task.start()
+        logger.info("Pacer timer scheduled: duration=%ds, ending=%s", duration, end_time)
 
     def timer_cancel(self):
         if self.timer_task is not None:
+            logger.debug("Clearing pacer timer ending at %s", self.timer_status.ending)
             self.timer_task.cancel()
             self.timer_task = None
 
@@ -181,12 +188,17 @@ class AgentPacer:
         self.timer_status.ending = None
 
     def timer_keep(self):
-        pass
+        logger.debug("Keeping pacer timer: active=%s, ending=%s",
+                     self.timer_status.active, self.timer_status.ending)
 
     def timer_routs(self, pacing, msg_time):
         self.timer_status.updated = msg_time
 
+        logger.debug("Pacing decision: action=%s, delay_seconds=%s",
+                     pacing["action"], pacing["delay_seconds"])
+
         if pacing["action"] == "cancel":
+            logger.info("Pacer requested timer cancellation")
             self.timer_cancel()
             return
         if pacing["action"] == "keep":
@@ -194,17 +206,20 @@ class AgentPacer:
             return
 
         duration = 0
-        started = None
+        start_time = None
 
         if pacing["action"] == "start":
             duration = pacing["delay_seconds"]
             start_time = msg_time
         if pacing["action"] == "postpone":
+            # Extend the original deadline rather than restarting from the current message.
             duration = self.timer_status.duration + pacing["delay_seconds"]
             start_time = self.timer_status.starting
 
         exp_end_time = start_time + timedelta(seconds=duration)
-        if (exp_end_time - datetime.now()).total_seconds() <= 60 : # Would not bother to postpone for less than 1 min
+        # Keep the existing timer if the proposed deadline is within a minute or already past.
+        if (exp_end_time - datetime.now()).total_seconds() <= 60:
+            logger.debug("Skipping near-term or expired pacing deadline: %s", exp_end_time)
             return
 
         if pacing["action"] in ["start", "postpone"]:
@@ -234,6 +249,7 @@ class AgentPacer:
             try:
                 self.msgs_queue.get_nowait()
                 self.msgs_queue.task_done()
+                logger.debug("Replaced pending pacing context with newer messages")
             except queue.Empty:
                 pass
 
@@ -241,20 +257,28 @@ class AgentPacer:
 
     def timer_fire(self):
         if self.session_key is None:
+            logger.warning("Pacer timer fired without a gateway session; skipping notification")
             self.timer_cancel()
             return
 
         self.timer_cancel()
-        self.ctx.inject_message(
-            self.prompt.return_msg(),
-            role="user",
-            session_key=self.session_key
-        )
+        # Timer callbacks run in a separate thread, so log failures here.
+        try:
+            self.ctx.inject_message(
+                self.prompt.return_msg(),
+                role="user",
+                session_key=self.session_key
+            )
+        except Exception:
+            logger.exception("Failed to inject pacing notification")
+            raise
+        logger.info("Pacing notification injected")
     
     def capture_gateway_session(self, session_key, **kwargs):
         self.session_key = session_key
+        logger.debug("Captured gateway session for pacing notifications")
 
-# Regist to Hermes
+# Register with Hermes
 def register(ctx):
     ctx.register_auxiliary_task(
         "pacer",
