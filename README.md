@@ -14,7 +14,20 @@ cp __init__.py plugin.yaml ~/.hermes/plugins/agent-pacer/
 hermes plugins enable agent-pacer
 ```
 
-Restart the Hermes gateway after enabling it. The plugin uses Hermes-managed LLM credentials and registers the `pacer` auxiliary task.
+For gateway use, also grant message-injection permission in the target Hermes profile's `config.yaml`. Merge this into any existing `plugins` configuration; do not replace other plugin settings:
+
+```yaml
+plugins:
+  entries:
+    agent-pacer:
+      allow_gateway_injection: true
+```
+
+Enabling the plugin alone does not grant this permission. It allows the plugin to trigger conversational turns in that profile. If you use a named profile, install, enable, and configure the plugin in that same profile rather than the default Hermes home.
+
+Restart the Hermes gateway after enabling and configuring it. The plugin uses Hermes-managed LLM credentials and registers the `pacer` auxiliary task.
+
+When a timer fires, injection is attempted once. A rejected request or exception is logged, and that notification is not retried automatically; a later completed turn can schedule another timer. A successful request means Hermes accepted it, not that the resulting turn completed or a message was delivered.
 
 ## Configuration
 

@@ -267,17 +267,23 @@ class AgentPacer:
 
     def timer_fire(self, session):
         self.timer_cancel()
-        # Timer callbacks run in a separate thread, so log failures here.
+        # One attempt per notification; failures are logged without automatic retries.
         try:
-            self.ctx.inject_message(
+            accepted = self.ctx.inject_message(
                 self.prompt.return_msg(),
                 role="user",
                 session_key=session
             )
         except Exception:
-            logger.exception("Failed to inject pacing notification")
-            raise
-        logger.info("Pacing notification injected")
+            logger.exception("Pacing notification injection failed; not retrying")
+            return
+        if not accepted:
+            logger.warning(
+                "Pacing notification injection was not accepted; not retrying. "
+                "Check gateway injection permission, session routing, and host logs."
+            )
+            return
+        logger.info("Pacing notification accepted by Hermes; delivery is not confirmed")
 
 # Register with Hermes
 def register(ctx):
