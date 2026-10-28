@@ -1,8 +1,16 @@
 import queue
 import threading
 import json
+import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
 
 # config
 
@@ -25,7 +33,7 @@ class Prompts:
     def request_context(self, msgs, timer_status) -> str:
         parted_prompt = [
             "<existing_timer>",
-            json.dumps(asdict(timer_status)),
+            json.dumps(asdict(timer_status), default=str),
             "</existing_timer>",
             "<recent_messages>",
             json.dumps(msgs),
@@ -81,7 +89,6 @@ class AgentPacer:
         self.pacer_schema = make_pacer_schema(config)
 
         self.timer_task = None
-        self.timer_task.daemon = True
         self.timer_status = TimerStatus()
 
         self.worker_thread = threading.Thread(
@@ -117,6 +124,8 @@ class AgentPacer:
                     result.parsed,
                     recents["time"]
                 )
+            except Exception:
+                logger.error("Pacer worker failed")
             finally:
                 self.msgs_queue.task_done()
 
@@ -135,7 +144,8 @@ class AgentPacer:
             wait_seconds,
             self.timer_fire
         )
-        self.timer_run()
+        self.timer_task.daemon = True
+        self.timer_task.start()
 
     def timer_cancel(self):
         if self.timer_task is not None:
@@ -150,9 +160,6 @@ class AgentPacer:
     def timer_keep(self):
         pass
 
-    def timer_run(self):
-        self.timer_task.start()
-
     def timer_routs(self, pacing, msg_time):
         self.timer_status.updated = msg_time
 
@@ -164,21 +171,24 @@ class AgentPacer:
             return
 
         duration = 0
+        started = None
 
         if pacing["action"] == "start":
             duration = pacing["delay_seconds"]
+            start_time = msg_time
         if pacing["action"] == "postpone":
             duration = self.timer_status.duration + pacing["delay_seconds"]
+            start_time = self.timer_status.starting
 
-        exp_end_time = self.timer_status.starting + timedelta(seconds=duration) if dir(self.timer_status.starting) == datetime else msg_time + timedelta(seconds=duration)
+        exp_end_time = start_time + timedelta(seconds=duration)
         if (exp_end_time - datetime.now()).total_seconds() <= 60 : # Would not bother to postpone for less than 1 min
             return
 
         if pacing["action"] in ["start", "postpone"]:
-            self.timer_start(duration, msg_time, exp_end_time)
+            self.timer_start(duration, start_time, exp_end_time)
     
     # Hermes part
-    def pacing_put(self, conversation_history):
+    def pacing_put(self, conversation_history, **kwargs):
         history = conversation_history
         recents = [
             {
@@ -206,6 +216,8 @@ class AgentPacer:
             role="user",
             session_key=self.session_key
         )
+
+        self.timer_cancel()
     
     def capture_gateway_session(self, session_key, **kwargs):
         self.session_key = session_key
