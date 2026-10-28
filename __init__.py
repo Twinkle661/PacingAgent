@@ -18,7 +18,7 @@ config = {
     "debug": False,
     "llm_timeout": 180,
     "pacer": {
-        "duration_min": 300,  #seconds
+        "duration_min": 1800,  #seconds
         "duration_max": 28800,
         "recent_messages": 8
     }
@@ -50,8 +50,9 @@ class Prompts:
         OUTPUT
         Return only the structured result required by the supplied schema. delay_seconds must be an integer between {minimum} and {maximum}, inclusive.For start it is the new interval; for postpone it is the added interval. For keep and cancel, set delay_seconds to {minimum}; it is ignored. If the schema requests reason, briefly state the contextual basis for theaction and timing. Do not add fields that the schema does not request.
         """
-    def request_context(self, msgs, timer_status) -> str:
+    def request_context(self, msgs, msg_time, timer_status) -> str:
         parted_prompt = [
+            f"<time now="{msg_time}" />",
             "<existing_timer>",
             json.dumps(asdict(timer_status), default=str),
             "</existing_timer>",
@@ -101,12 +102,14 @@ class TimerStatus:
 
 class AgentPacer:
     def __init__(self, ctx, config):
-        self.task = None
         self.ctx = ctx
         self.config = config
+
         self.prompt = Prompts()
-        self.msgs_queue = queue.Queue()
         self.pacer_schema = make_pacer_schema(config)
+
+        self.msgs_queue = queue.Queue(maxsize=1)
+        self.enqueue_lock = threading.Lock()
 
         self.timer_task = None
         self.timer_status = TimerStatus()
@@ -128,7 +131,7 @@ class AgentPacer:
                     instructions=self.prompt.request_instruction(self.config["pacer"]),
                     input=[{
                             "type": "text",
-                            "text": self.prompt.request_context(recents["msgs"], self.timer_status)
+                            "text": self.prompt.request_context(recents["msgs"], recents["time"], self.timer_status)
                     }],
                     json_schema=self.pacer_schema,
                     task="pacer",
@@ -222,22 +225,31 @@ class AgentPacer:
             )
         ][-self.config["pacer"]["recent_messages"]:]
 
-        self.msgs_queue.put_nowait({
+        job = {
             "time": datetime.now(),
             "msgs": recents
-        })
+        }
+
+        with self.enqueue_lock:
+            try:
+                self.msgs_queue.get_nowait()
+                self.msgs_queue.task_done()
+            except queue.Empty:
+                pass
+
+            self.msgs_queue.put_nowait(job)
 
     def timer_fire(self):
         if self.session_key is None:
+            self.timer_cancel()
             return
 
+        self.timer_cancel()
         self.ctx.inject_message(
             self.prompt.return_msg(),
             role="user",
             session_key=self.session_key
         )
-
-        self.timer_cancel()
     
     def capture_gateway_session(self, session_key, **kwargs):
         self.session_key = session_key
