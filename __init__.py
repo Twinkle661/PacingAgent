@@ -147,6 +147,8 @@ class AgentPacer:
                 if result.parsed is None:
                     raise ValueError("LLM returned no parsed pacing result")
 
+                logger.info("Pacer decision: %s", result.parsed)
+
                 self.timer_routs(
                     result.parsed,
                     recents["time"],
@@ -234,6 +236,7 @@ class AgentPacer:
     
     # Hermes part
     def pacing_put(self, conversation_history, **kwargs):
+        logger.info("Pacer received completed turn")
         session_key = get_session_env("HERMES_SESSION_KEY", "")
         
         history = conversation_history
@@ -299,3 +302,4 @@ def register(ctx):
         "post_llm_call",
         pacer.pacing_put
     )
+    logger.info("Pacing Agent registered")
