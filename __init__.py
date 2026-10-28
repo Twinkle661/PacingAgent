@@ -289,7 +289,7 @@ class AgentPacer:
 def register(ctx):
     ctx.register_auxiliary_task(
         "pacer",
-        display_name="Agent Pacer",
+        display_name="Pacing Agent",
         description="Decide the next conversational timer action."
     )
 
