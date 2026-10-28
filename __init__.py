@@ -5,6 +5,7 @@ import logging
 from gateway.session_context import get_session_env
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
+from contextvars import copy_context
 
 logging.basicConfig(
     level=logging.INFO,
@@ -118,10 +119,12 @@ class AgentPacer:
 
         self.timer_task = None
         self.timer_status = TimerStatus()
-
+        
+        worker_context = copy_context()
         self.worker_thread = threading.Thread(
-            target=self.pacing_worker,
-            daemon=True
+            target=worker_context.run,
+            args=(self.pacing_worker,),
+            daemon=True,
         )
         self.worker_thread.start()
 
