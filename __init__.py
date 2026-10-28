@@ -22,7 +22,7 @@ config = {
     "debug": False,
     "llm_timeout": 180,
     "pacer": {
-        "duration_min": 1800,  #seconds
+        "duration_min": 300,  #seconds
         "duration_max": 28800,
         "recent_messages": 8
     }
