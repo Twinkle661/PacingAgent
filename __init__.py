@@ -212,6 +212,9 @@ class AgentPacer:
             duration = pacing["delay_seconds"]
             start_time = msg_time
         if pacing["action"] == "postpone":
+            if not self.timer_status.active or self.timer_status.starting is None:
+                logger.debug("Skipping postpone: no valid active pacing timer")
+                return
             # Extend the original deadline rather than restarting from the current message.
             duration = self.timer_status.duration + pacing["delay_seconds"]
             start_time = self.timer_status.starting
