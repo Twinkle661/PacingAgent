@@ -2,6 +2,7 @@ import queue
 import threading
 import json
 import logging
+from gateway.session_context import get_session_env
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 
@@ -97,6 +98,7 @@ def make_pacer_schema(config):
 class TimerStatus:
     active: bool = False
     updated: datetime | None = None
+    session: str | None = None
     starting: datetime | None = None
     duration: int = 0
     ending: datetime | None = None
@@ -123,9 +125,7 @@ class AgentPacer:
         )
         self.worker_thread.start()
 
-        self.session_key = None
-
-    # LLM Request
+    # Pacer Request
     def pacing_worker(self):
         while True:
             recents = self.msgs_queue.get()
@@ -149,7 +149,8 @@ class AgentPacer:
 
                 self.timer_routs(
                     result.parsed,
-                    recents["time"]
+                    recents["time"],
+                    recents["session"],
                 )
             except Exception:
                 logger.exception("Pacer worker failed")
@@ -157,20 +158,22 @@ class AgentPacer:
                 self.msgs_queue.task_done()
 
     # Timer
-    def timer_start(self, duration: int, start_time: datetime, end_time: datetime):
+    def timer_start(self, duration: int, start_time: datetime, end_time: datetime, session: str):
         self.timer_cancel()
 
         self.timer_status.active = True
         self.timer_status.starting = start_time
         self.timer_status.duration = duration
         self.timer_status.ending = end_time
+        self.timer_status.session = session
 
         # Anchor the deadline to the triggering message so LLM latency adds no extra delay.
         wait_seconds = (end_time - datetime.now()).total_seconds()
 
         self.timer_task = threading.Timer(
             wait_seconds,
-            self.timer_fire
+            self.timer_fire,
+            args=(session,)
         )
         self.timer_task.daemon = True
         self.timer_task.start()
@@ -186,12 +189,13 @@ class AgentPacer:
         self.timer_status.starting = None
         self.timer_status.duration = 0
         self.timer_status.ending = None
+        self.timer_status.session = None
 
     def timer_keep(self):
         logger.debug("Keeping pacer timer: active=%s, ending=%s",
                      self.timer_status.active, self.timer_status.ending)
 
-    def timer_routs(self, pacing, msg_time):
+    def timer_routs(self, pacing, msg_time, session):
         self.timer_status.updated = msg_time
 
         logger.debug("Pacing decision: action=%s, delay_seconds=%s",
@@ -226,10 +230,12 @@ class AgentPacer:
             return
 
         if pacing["action"] in ["start", "postpone"]:
-            self.timer_start(duration, start_time, exp_end_time)
+            self.timer_start(duration, start_time, exp_end_time, session)
     
     # Hermes part
     def pacing_put(self, conversation_history, **kwargs):
+        session_key = get_session_env("HERMES_SESSION_KEY", "")
+        
         history = conversation_history
         recents = [
             {
@@ -245,7 +251,8 @@ class AgentPacer:
 
         job = {
             "time": datetime.now(),
-            "msgs": recents
+            "msgs": recents,
+            "session": session_key
         }
 
         with self.enqueue_lock:
@@ -258,28 +265,19 @@ class AgentPacer:
 
             self.msgs_queue.put_nowait(job)
 
-    def timer_fire(self):
-        if self.session_key is None:
-            logger.warning("Pacer timer fired without a gateway session; skipping notification")
-            self.timer_cancel()
-            return
-
+    def timer_fire(self, session):
         self.timer_cancel()
         # Timer callbacks run in a separate thread, so log failures here.
         try:
             self.ctx.inject_message(
                 self.prompt.return_msg(),
                 role="user",
-                session_key=self.session_key
+                session_key=session
             )
         except Exception:
             logger.exception("Failed to inject pacing notification")
             raise
         logger.info("Pacing notification injected")
-    
-    def capture_gateway_session(self, session_key, **kwargs):
-        self.session_key = session_key
-        logger.debug("Captured gateway session for pacing notifications")
 
 # Register with Hermes
 def register(ctx):
@@ -291,7 +289,6 @@ def register(ctx):
 
     pacer = AgentPacer(ctx, config)
 
-    ctx.register_hook("post_gateway_admission", pacer.capture_gateway_session)
     ctx.register_hook(
         "post_llm_call",
         pacer.pacing_put

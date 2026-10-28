@@ -1,0 +1,5 @@
+name: agent-pacer
+version: "0.1.0"
+description: LLM-guided timers that give the agent an opportunity to reconnect after a conversation.
+provides_hooks:
+  - post_llm_call
