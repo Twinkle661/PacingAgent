@@ -1,7 +1,8 @@
 import queue
 import threading
+import json
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 # config
 
@@ -19,11 +20,20 @@ config = {
 
 class Prompts:
     def request_instruction(self, **kwargs) -> str:
+        prompt = ""
         return 
-    def request_context(self, **kwargs) -> str:
-        return
-    def return_msg(self, args) -> str:
-        return
+    def request_context(self, msgs, timer_status) -> str:
+        parted_prompt = [
+            "<existing_timer>",
+            json.dumps(asdict(timer_status)),
+            "</existing_timer>",
+            "<recent_messages>",
+            json.dumps(msgs),
+            "</recent_messages>"
+        ]
+        return "\n\n".join(parted_prompt)
+    def return_msg(self) -> str:
+        return f"[Time Passed: it is {datetime.now().strftime('%H:%M:%S')} now.]"
 
 # Schema
 
@@ -89,9 +99,10 @@ class AgentPacer:
             try:
                 result = self.ctx.llm.complete_structured(
                     instructions=(self.prompt.request_instruction()),
-                    input=[
-                        {"type": "text", "text": self.prompt.request_context(recents["msgs"])}
-                    ],
+                    input=[{
+                            "type": "text",
+                            "text": self.prompt.request_context(recents["msgs"], self.timer_status)
+                    }],
                     json_schema=self.pacer_schema,
                     task="pacer",
                     temperature=0,
