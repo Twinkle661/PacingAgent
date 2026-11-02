@@ -52,7 +52,7 @@ Edit the `config` dictionary near the top of the installed `__init__.py`, then r
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `pacer.duration_min` | `1800` | Minimum delay per decision, in seconds |
+| `pacer.duration_min` | `300` | Minimum delay per decision, in seconds |
 | `pacer.duration_max` | `28800` | Maximum delay per decision, in seconds |
 | `pacer.recent_messages` | `8` | Recent user/assistant messages reviewed per decision |
 | `llm_timeout` | `180` | Timeout passed to the background LLM request, in seconds |
