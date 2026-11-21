@@ -28,8 +28,8 @@ interface PacerConfig {
 	timeZone?: string;
 	/** Restore an active timer from the session file after a restart / resume / reload. */
 	restoreOnStartup: boolean;
-	/** Log file path. Empty string disables file logging. */
-	logFile: string;
+	/** Log file path. Defaults to pacing-agent.log next to the config file (or next to index.ts). Empty string disables logging. */
+	logFile?: string;
 	pacer: {
 		durationMin: number;
 		durationMax: number;
@@ -42,7 +42,6 @@ const DEFAULT_CONFIG: PacerConfig = {
 	llmTimeout: 180,
 	maxTokens: 512,
 	restoreOnStartup: true,
-	logFile: join(getAgentDir(), "pacing-agent.log"),
 	pacer: {
 		durationMin: 300,
 		durationMax: 28800,
@@ -56,21 +55,23 @@ const DEFAULT_CONFIG: PacerConfig = {
  *   2. config.json next to this file (manual install in ~/.pi/agent/extensions/pacing-agent/)
  *   3. ~/.pi/agent/pacing-agent.json (git install: `pi update` runs `git clean`, which would delete 2)
  */
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 function configCandidates(): string[] {
-	const here = dirname(fileURLToPath(import.meta.url));
-	return [process.env.PACING_AGENT_CONFIG, join(here, "config.json"), join(getAgentDir(), "pacing-agent.json")].filter(
+	return [process.env.PACING_AGENT_CONFIG, join(HERE, "config.json"), join(getAgentDir(), "pacing-agent.json")].filter(
 		(p): p is string => Boolean(p),
 	);
 }
 
 function loadConfig(): { config: PacerConfig; path: string | null } {
 	const path = configCandidates().find((p) => existsSync(p)) ?? null;
-	if (!path) return { config: DEFAULT_CONFIG, path: null };
-	const raw = JSON.parse(readFileSync(path, "utf-8")) as Partial<PacerConfig>;
+	const raw = path ? (JSON.parse(readFileSync(path, "utf-8")) as Partial<PacerConfig>) : {};
 	return {
 		config: {
 			...DEFAULT_CONFIG,
 			...raw,
+			// Logs stay beside whichever config is in use, so nothing spills elsewhere.
+			logFile: raw.logFile ?? join(path ? dirname(path) : HERE, "pacing-agent.log"),
 			pacer: { ...DEFAULT_CONFIG.pacer, ...(raw.pacer ?? {}) },
 		},
 		path,

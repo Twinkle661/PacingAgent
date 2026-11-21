@@ -12,15 +12,26 @@ Only the latest pending context is kept; a request already in flight is not inte
 
 ## Installation
 
-**Manual (recommended for a single machine):**
+**Manual: clone into the extensions folder (recommended):**
+
+```sh
+cd ~/.pi/agent/extensions
+git clone https://github.com/Twinkle661/PacingAgent.git pacing-agent
+cp pacing-agent/pi/config.example.json pacing-agent/pi/config.json   # then edit
+```
+
+pi finds the root `package.json` in `extensions/pacing-agent/` and loads `pi/index.ts`. Config and log live in `pacing-agent/pi/` and are git-ignored. Update with `git pull`.
+
+**Manual: copy only the pi folder:**
 
 ```
 ~/.pi/agent/extensions/pacing-agent/
-├── index.ts      # copy of pi/index.ts
-└── config.json   # your settings, see config.example.json
+├── index.ts
+├── config.json         # your settings, see config.example.json
+└── pacing-agent.log    # created at runtime
 ```
 
-pi auto-discovers `extensions/*/index.ts`. No build step is needed: pi loads TypeScript directly.
+No build step is needed either way: pi loads TypeScript directly.
 
 **As a pi package:**
 
@@ -53,7 +64,7 @@ See [`config.example.json`](config.example.json). Every key is optional. The log
 | `maxTokens` | `512` | Output cap for the background request |
 | `debug` | `false` | Ask for a `reason` in the decision and write DEBUG lines to the log |
 | `restoreOnStartup` | `true` | Restore an active timer from the session file on startup, resume and reload |
-| `logFile` | `~/.pi/agent/pacing-agent.log` | Log file; `""` disables logging |
+| `logFile` | `pacing-agent.log` beside the config file in use (beside `index.ts` if there is none) | Log file; `""` disables logging |
 
 Restart pi (or `/reload`) after changing the config. Credentials come from pi's normal auth; none go in this file.
 
