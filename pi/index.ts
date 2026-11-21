@@ -9,7 +9,8 @@
  */
 
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
@@ -49,14 +50,30 @@ const DEFAULT_CONFIG: PacerConfig = {
 	},
 };
 
-function loadConfig(): PacerConfig {
-	const path = process.env.PACING_AGENT_CONFIG || join(getAgentDir(), "pacing-agent.json");
-	if (!existsSync(path)) return DEFAULT_CONFIG;
+/**
+ * Config lookup, first existing file wins:
+ *   1. $PACING_AGENT_CONFIG
+ *   2. config.json next to this file (manual install in ~/.pi/agent/extensions/pacing-agent/)
+ *   3. ~/.pi/agent/pacing-agent.json (git install: `pi update` runs `git clean`, which would delete 2)
+ */
+function configCandidates(): string[] {
+	const here = dirname(fileURLToPath(import.meta.url));
+	return [process.env.PACING_AGENT_CONFIG, join(here, "config.json"), join(getAgentDir(), "pacing-agent.json")].filter(
+		(p): p is string => Boolean(p),
+	);
+}
+
+function loadConfig(): { config: PacerConfig; path: string | null } {
+	const path = configCandidates().find((p) => existsSync(p)) ?? null;
+	if (!path) return { config: DEFAULT_CONFIG, path: null };
 	const raw = JSON.parse(readFileSync(path, "utf-8")) as Partial<PacerConfig>;
 	return {
-		...DEFAULT_CONFIG,
-		...raw,
-		pacer: { ...DEFAULT_CONFIG.pacer, ...(raw.pacer ?? {}) },
+		config: {
+			...DEFAULT_CONFIG,
+			...raw,
+			pacer: { ...DEFAULT_CONFIG.pacer, ...(raw.pacer ?? {}) },
+		},
+		path,
 	};
 }
 
@@ -584,7 +601,7 @@ class AgentPacer {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-	const config = loadConfig();
+	const { config, path: configPath } = loadConfig();
 	const log = makeLogger(config);
 	const pacer = new AgentPacer(pi, config, log);
 
@@ -592,7 +609,7 @@ export default function (pi: ExtensionAPI) {
 		// Print mode exits after one prompt; there is nobody to reach out to.
 		if (ctx.mode === "print") return;
 		pacer.attach(ctx, event.reason);
-		log("INFO", `Pacing Agent attached (reason=${event.reason}, mode=${ctx.mode})`);
+		log("INFO", `Pacing Agent attached (reason=${event.reason}, mode=${ctx.mode}, config=${configPath ?? "defaults"})`);
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
