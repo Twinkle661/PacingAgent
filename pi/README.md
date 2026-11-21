@@ -12,19 +12,46 @@ Only the latest pending context is kept; a request already in flight is not inte
 
 ## Installation
 
-Install as a pi package from this repository:
+**Manual: clone into the extensions folder (recommended):**
+
+```sh
+cd ~/.pi/agent/extensions
+git clone https://github.com/Twinkle661/PacingAgent.git pacing-agent
+cp pacing-agent/pi/config.example.json pacing-agent/pi/config.json   # then edit
+```
+
+pi finds the root `package.json` in `extensions/pacing-agent/` and loads `pi/index.ts`. Config and log live in `pacing-agent/pi/` and are git-ignored. Update with `git pull`.
+
+**Manual: copy only the pi folder:**
+
+```
+~/.pi/agent/extensions/pacing-agent/
+├── index.ts
+├── config.json         # your settings, see config.example.json
+└── pacing-agent.log    # created at runtime
+```
+
+No build step is needed either way: pi loads TypeScript directly.
+
+**As a pi package:**
 
 ```sh
 pi install git:github.com/Twinkle661/PacingAgent
 ```
 
-The root `package.json` points pi at `pi/index.ts`. To load a local checkout instead, add the file to `extensions` in `~/.pi/agent/settings.json`, or try it once with `pi -e ./pi/index.ts`.
+This clones the repository to `~/.pi/agent/git/github.com/Twinkle661/PacingAgent/` and records it in `~/.pi/agent/settings.json`; the root `package.json` points pi at `pi/index.ts`. Update with `pi update --extensions`. Do not put `config.json` inside that clone: `pi update` runs `git clean -fdx` and deletes it. Use `~/.pi/agent/pacing-agent.json` instead.
 
-No build step is needed: pi loads TypeScript directly.
+Use one method, not both, or the extension loads twice and sends two notifications. To try it once without installing: `pi -e ./pi/index.ts`.
 
 ## Configuration
 
-Create `~/.pi/agent/pacing-agent.json` (or set `PACING_AGENT_CONFIG` to another path). See [`pacing-agent.example.json`](pacing-agent.example.json). Every key is optional.
+The first file that exists is used:
+
+1. `$PACING_AGENT_CONFIG`
+2. `config.json` next to `index.ts` (manual install)
+3. `~/.pi/agent/pacing-agent.json` (package install)
+
+See [`config.example.json`](config.example.json). Every key is optional. The log shows which file was loaded.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
@@ -37,7 +64,7 @@ Create `~/.pi/agent/pacing-agent.json` (or set `PACING_AGENT_CONFIG` to another 
 | `maxTokens` | `512` | Output cap for the background request |
 | `debug` | `false` | Ask for a `reason` in the decision and write DEBUG lines to the log |
 | `restoreOnStartup` | `true` | Restore an active timer from the session file on startup, resume and reload |
-| `logFile` | `~/.pi/agent/pacing-agent.log` | Log file; `""` disables logging |
+| `logFile` | `pacing-agent.log` beside the config file in use (beside `index.ts` if there is none) | Log file; `""` disables logging |
 
 Restart pi (or `/reload`) after changing the config. Credentials come from pi's normal auth; none go in this file.
 
