@@ -1,0 +1,14 @@
+{
+  "name": "pacing-agent",
+  "version": "0.1.0",
+  "description": "LLM-guided timers that give the agent an opportunity to reconnect after a conversation.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./pi/index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

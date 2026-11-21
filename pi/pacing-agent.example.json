@@ -1,0 +1,13 @@
+{
+  "model": { "provider": "<your-provider>", "id": "<your-model-id>" },
+  "timeZone": "Europe/London",
+  "debug": false,
+  "llmTimeout": 180,
+  "maxTokens": 512,
+  "restoreOnStartup": true,
+  "pacer": {
+    "durationMin": 300,
+    "durationMax": 28800,
+    "recentMessages": 8
+  }
+}
